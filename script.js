@@ -1,71 +1,209 @@
-Â·çõãáãóáãçõíà·▲▼óáãéíéáá·úí·á<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Câmbio · painel de cotações</title>
-  <meta name="description" content="Painel de cotações de moedas em tempo real com gráfico SVG desenhado à mão, consumindo a AwesomeAPI.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&family=Spline+Sans+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
+/* ==========================================================
+   CÂMBIO · painel de cotações
+   Consome a AwesomeAPI (sem chave), renderiza um telão de
+   moedas e desenha o gráfico de 30 dias em SVG na mão.
+   ========================================================== */
 
-  <header class="topo">
-    <div>
-      <h1>CÂMBIO</h1>
-      <p class="topo-sub">cotações em tempo real · fonte: AwesomeAPI</p>
-    </div>
-    <p class="atualizado" id="atualizadoEm">carregando…</p>
-  </header>
+const API_BASE = "https://economia.awesomeapi.com.br/json";
 
-  <main class="painel">
+const MOEDAS = [
+  { par: "USD-BRL", codigo: "USD", nome: "Dólar" },
+  { par: "EUR-BRL", codigo: "EUR", nome: "Euro" },
+  { par: "GBP-BRL", codigo: "GBP", nome: "Libra" },
+  { par: "BTC-BRL", codigo: "BTC", nome: "Bitcoin" },
+];
 
-    <!-- Telão de moedas -->
-    <section class="telao" id="telao" aria-label="Cotações do dia">
-      <!-- Cards de moeda entram via script.js -->
-    </section>
+const telao = document.getElementById("telao");
+const erro = document.getElementById("erro");
+const atualizadoEm = document.getElementById("atualizadoEm");
 
-    <!-- Gráfico dos últimos 30 dias -->
-    <section class="grafico-bloco">
-      <header class="grafico-cabeca">
-        <h2 id="graficoTitulo">Dólar · últimos 30 dias</h2>
-        <div class="grafico-legenda" id="graficoLegenda"></div>
-      </header>
-      <div class="grafico-area" id="graficoArea">
-        <svg id="grafico" viewBox="0 0 640 220" role="img"
-             aria-label="Gráfico de linha da variação da moeda nos últimos 30 dias"></svg>
+let cotacoes = {};          // { USD: { valor, variacao, nome } ... }
+let moedaAtiva = "USD";     // moeda exibida no gráfico e no conversor
+
+// ---------- Carga inicial ----------
+
+iniciar();
+document.getElementById("btnTentar").addEventListener("click", iniciar);
+
+async function iniciar() {
+  erro.hidden = true;
+  renderEsqueleto();
+
+  try {
+    await carregarCotacoes();
+    renderTelao();
+    await carregarHistorico(moedaAtiva);
+    atualizarConversor();
+  } catch (e) {
+    console.error(e);
+    telao.innerHTML = "";
+    erro.hidden = false;
+    atualizadoEm.textContent = "sem conexão";
+  }
+}
+
+function renderEsqueleto() {
+  telao.innerHTML = MOEDAS.map(
+    (m) => `
+    <div class="moeda esqueleto">
+      <span class="moeda-codigo">${m.codigo} / BRL</span>
+      <div class="moeda-valor">0,0000</div>
+      <div class="moeda-variacao">&nbsp;</div>
+    </div>`
+  ).join("");
+}
+
+// ---------- Cotações do dia ----------
+
+async function carregarCotacoes() {
+  const pares = MOEDAS.map((m) => m.par).join(",");
+  const resposta = await fetch(`${API_BASE}/last/${pares}`);
+  if (!resposta.ok) throw new Error("API respondeu " + resposta.status);
+
+  const dados = await resposta.json();
+
+  MOEDAS.forEach((m) => {
+    // A API devolve as chaves sem o hífen: USDBRL, EURBRL...
+    const item = dados[m.par.replace("-", "")];
+    cotacoes[m.codigo] = {
+      nome: m.nome,
+      valor: parseFloat(item.bid),
+      variacao: parseFloat(item.pctChange),
+    };
+  });
+
+  const agora = new Date();
+  atualizadoEm.textContent =
+    "atualizado às " +
+    agora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderTelao() {
+  telao.innerHTML = "";
+
+  MOEDAS.forEach((m) => {
+    const c = cotacoes[m.codigo];
+    const subiu = c.variacao >= 0;
+
+    const card = document.createElement("button");
+    card.className = "moeda" + (m.codigo === moedaAtiva ? " ativa" : "");
+    card.innerHTML = `
+      <span class="moeda-codigo">${m.codigo} / BRL · ${c.nome}</span>
+      <div class="moeda-valor">${formatarBRL(c.valor, m.codigo === "BTC" ? 0 : 4)}</div>
+      <div class="moeda-variacao ${subiu ? "sobe" : "desce"}">
+        ${subiu ? "▲" : "▼"} ${c.variacao.toFixed(2)}% hoje
       </div>
-    </section>
+    `;
 
-    <!-- Conversor -->
-    <section class="conversor" aria-label="Conversor de moedas">
-      <h2>Conversor rápido</h2>
-      <div class="conversor-linha">
-        <label>
-          Reais (BRL)
-          <input type="number" id="inputBRL" min="0" step="0.01" value="100">
-        </label>
-        <span class="conversor-seta" aria-hidden="true">⇄</span>
-        <label>
-          <span id="rotuloMoeda">Dólar (USD)</span>
-          <input type="number" id="inputMoeda" min="0" step="0.01">
-        </label>
-      </div>
-    </section>
+    card.addEventListener("click", async () => {
+      moedaAtiva = m.codigo;
+      renderTelao();
+      atualizarConversor();
+      await carregarHistorico(m.codigo);
+    });
 
-    <p class="erro" id="erro" hidden>
-      Não consegui falar com a API de cotações agora. Verifique sua conexão e
-      <button type="button" id="btnTentar">tente de novo</button>.
-    </p>
+    telao.appendChild(card);
+  });
+}
 
-  </main>
+function formatarBRL(valor, casas) {
+  return valor.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: casas,
+    maximumFractionDigits: casas,
+  });
+}
 
-  <footer class="rodape">
-    <p>HTML, CSS e JavaScript puro · gráfico SVG desenhado à mão · dados da AwesomeAPI (economia.awesomeapi.com.br)</p>
-  </footer>
+// ---------- Histórico + gráfico SVG ----------
 
-  <script src="script.js"></script>
-</body>
-</html>
+async function carregarHistorico(codigo) {
+  const par = MOEDAS.find((m) => m.codigo === codigo).par;
+  const resposta = await fetch(`${API_BASE}/daily/${par}/30`);
+  if (!resposta.ok) throw new Error("API respondeu " + resposta.status);
+
+  const dados = await resposta.json();
+
+  // A API devolve do mais recente para o mais antigo; invertemos
+  const serie = dados
+    .map((d) => parseFloat(d.bid))
+    .reverse();
+
+  desenharGrafico(serie, codigo);
+}
+
+function desenharGrafico(serie, codigo) {
+  const svg = document.getElementById("grafico");
+  const LARGURA = 640;
+  const ALTURA = 220;
+  const MARGEM = { topo: 16, base: 26, esq: 12, dir: 64 };
+
+  const areaL = LARGURA - MARGEM.esq - MARGEM.dir;
+  const areaA = ALTURA - MARGEM.topo - MARGEM.base;
+
+  const min = Math.min(...serie);
+  const max = Math.max(...serie);
+  const amplitude = max - min || 1; // evita divisão por zero em série plana
+
+  // Converte índice e valor em coordenadas do SVG
+  const x = (i) => MARGEM.esq + (i / (serie.length - 1)) * areaL;
+  const y = (v) => MARGEM.topo + (1 - (v - min) / amplitude) * areaA;
+
+  // Caminho da linha, ponto a ponto
+  const caminhoLinha = serie
+    .map((v, i) => (i === 0 ? "M" : "L") + x(i).toFixed(1) + " " + y(v).toFixed(1))
+    .join(" ");
+
+  // Mesmo caminho fechado até a base, para a área sombreada
+  const caminhoArea =
+    caminhoLinha +
+    ` L ${x(serie.length - 1).toFixed(1)} ${MARGEM.topo + areaA}` +
+    ` L ${MARGEM.esq} ${MARGEM.topo + areaA} Z`;
+
+  const ultimo = serie[serie.length - 1];
+
+  svg.innerHTML = `
+    <line class="linha-guia" x1="${MARGEM.esq}" y1="${y(max)}" x2="${LARGURA - MARGEM.dir}" y2="${y(max)}"/>
+    <line class="linha-guia" x1="${MARGEM.esq}" y1="${y(min)}" x2="${LARGURA - MARGEM.dir}" y2="${y(min)}"/>
+    <text class="texto-eixo" x="${LARGURA - MARGEM.dir + 6}" y="${y(max) + 4}">${max.toFixed(codigo === "BTC" ? 0 : 2)}</text>
+    <text class="texto-eixo" x="${LARGURA - MARGEM.dir + 6}" y="${y(min) + 4}">${min.toFixed(codigo === "BTC" ? 0 : 2)}</text>
+    <path class="area-serie" d="${caminhoArea}"/>
+    <path class="linha-serie" d="${caminhoLinha}"/>
+    <circle class="ponto-final" cx="${x(serie.length - 1)}" cy="${y(ultimo)}" r="4"/>
+    <text class="texto-eixo" x="${MARGEM.esq}" y="${ALTURA - 8}">30 dias atrás</text>
+    <text class="texto-eixo" x="${LARGURA - MARGEM.dir - 30}" y="${ALTURA - 8}">hoje</text>
+  `;
+
+  const nome = cotacoes[codigo].nome;
+  document.getElementById("graficoTitulo").textContent = `${nome} · últimos 30 dias`;
+  document.getElementById("graficoLegenda").textContent =
+    `mín ${min.toFixed(2)} · máx ${max.toFixed(2)}`;
+}
+
+// ---------- Conversor ----------
+
+const inputBRL = document.getElementById("inputBRL");
+const inputMoeda = document.getElementById("inputMoeda");
+const rotuloMoeda = document.getElementById("rotuloMoeda");
+
+inputBRL.addEventListener("input", () => converter("brl"));
+inputMoeda.addEventListener("input", () => converter("moeda"));
+
+function atualizarConversor() {
+  const c = cotacoes[moedaAtiva];
+  rotuloMoeda.textContent = `${c.nome} (${moedaAtiva})`;
+  converter("brl");
+}
+
+function converter(origem) {
+  const taxa = cotacoes[moedaAtiva]?.valor;
+  if (!taxa) return;
+
+  if (origem === "brl") {
+    const brl = parseFloat(inputBRL.value) || 0;
+    inputMoeda.value = (brl / taxa).toFixed(moedaAtiva === "BTC" ? 6 : 2);
+  } else {
+    const qtd = parseFloat(inputMoeda.value) || 0;
+    inputBRL.value = (qtd * taxa).toFixed(2);
+  }
+}
