@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+Â·çõãáãóáãçõíà·▲▼óáãéíéáá·úí·á<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
